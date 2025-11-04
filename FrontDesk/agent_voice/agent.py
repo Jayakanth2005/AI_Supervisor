@@ -1,22 +1,3 @@
-# from .speech import listen, speak
-# import requests
-# import os
-# from dotenv import load_dotenv
-
-# load_dotenv()
-# BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-
-# def run_voice_agent():
-#     caller_name = input("Enter your name: ")
-#     speak(f"Hello {caller_name}, how can I help you today?")
-#     while True:
-#         question = listen()
-#         if not question or "exit" in question.lower():
-#             speak("Goodbye!")
-
-#             break
-#         res = requests.post(f"{BACKEND_URL}/help-requests", params={"caller_name": caller_name, "question": question})
-#         speak("Your question has been sent to the backend.")
 
 
 from .speech import listen, speak
@@ -67,6 +48,42 @@ def is_relevant(user_q, kb_q):
     return len(overlap) >= 2  # at least 2 common keywords = relevant
 
 
+# def run_voice_agent():
+#     caller_name = input("Enter your name: ")
+#     speak(f"Hello {caller_name}, how can I help you today?")
+
+#     while True:
+#         question = listen()
+#         if not question:
+#             continue
+#         if "exit" in question.lower():
+#             speak("Goodbye!")
+#             break
+
+#         print(f"🔍 Searching KB for: {question}")
+#         kb_results = kb_search(question, top_k=3)
+
+#         if not kb_results:
+#             speak("I couldn't find an answer in the knowledge base. Sending your question to the supervisor.")
+#             create_help_request(caller_name, question)
+#             continue
+
+#         top = kb_results[0]
+#         top_score = top.get("score", 0)
+#         top_question = top.get("question_pattern", "")
+#         top_answer = top.get("answer", "")
+
+#         # Adjust confidence threshold as needed
+#         kb_cutoff = 0.75
+#         if top_score >= kb_cutoff and is_relevant(question, top_question):
+#             print(f"✅ Confident KB match (score={top_score:.2f})")
+#             speak(f"Here's what I found: {top_answer}")
+#         else:
+#             print(f"⚠️ Low confidence (score={top_score:.2f}). Escalating.")
+#             speak("I'm not sure about the answer. Sending your question to the supervisor.")
+#             create_help_request(caller_name, question)
+
+# inside agent_voice/agent.py (only the loop shown; replace your current loop body)
 def run_voice_agent():
     caller_name = input("Enter your name: ")
     speak(f"Hello {caller_name}, how can I help you today?")
@@ -74,7 +91,13 @@ def run_voice_agent():
     while True:
         question = listen()
         if not question:
+            # No audio captured - prompt again
             continue
+
+        question = question.strip()
+        if not question:
+            continue
+
         if "exit" in question.lower():
             speak("Goodbye!")
             break
@@ -96,11 +119,13 @@ def run_voice_agent():
         kb_cutoff = 0.75
         if top_score >= kb_cutoff and is_relevant(question, top_question):
             print(f"✅ Confident KB match (score={top_score:.2f})")
+            # speak the answer (speech.speak handles chunking)
             speak(f"Here's what I found: {top_answer}")
         else:
             print(f"⚠️ Low confidence (score={top_score:.2f}). Escalating.")
             speak("I'm not sure about the answer. Sending your question to the supervisor.")
             create_help_request(caller_name, question)
+
 
 
 if __name__ == "__main__":

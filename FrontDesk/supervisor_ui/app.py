@@ -1,19 +1,18 @@
 
 import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import streamlit as st
 import requests
 from dotenv import load_dotenv
 from typing import Optional
 import re 
-from FrontDesk.agent_voice.speech import speak
+from agent_voice.speech import speak
+
+
 
 
 load_dotenv()  # loads supervisor_ui/.env if present, or project root .env
 
-# Default backend URL. Change to your actual backend URL if not running locally.
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # Utility function to build absolute backend endpoints
@@ -300,15 +299,16 @@ with tabs[1]:
 
             if top_score >= kb_cutoff and is_relevant(question, top_question):
                 st.success(f"Top KB match is confident (score {top_score:.2f}). Agent can auto-reply.")
-                speak(f"Here's what I found: {top_answer}")  # ✅ Voice output of KB answer
                 st.info("Agent replied with:")
                 st.write(top_answer)
+                speak(f"Here's what I found: {top_answer}")  # Voice feedback (non-blocking)
             else:
                 st.warning(f"Low confidence (score {top_score:.2f}). Escalating to Supervisor.")
                 try:
                     r = create_help_request(caller_name, question, livekit_room=room_name or None)
                     st.success(f"Created help request ID: {r.get('id')}")
-                    speak("I'm not sure about the answer. Sending your question to the supervisor.")  # ✅ Voice output
+                    st.info("Supervisor will review this soon.")
+                    speak("I'm not sure about the answer. Sending your question to the supervisor.")
                 except Exception as e:
                     st.error(f"Failed to create help request: {e}")
 
@@ -398,193 +398,3 @@ with tabs[2]:
 
 
 
-
-
-
-# supervisor_ui/app.py
-# """ import os
-# import streamlit as st
-# import requests
-# from dotenv import load_dotenv
-# from typing import Optional
-
-# load_dotenv()
-# BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-
-# def backend_url(path: str) -> str:
-#     return BACKEND_URL.rstrip("/") + path
-
-# st.set_page_config(page_title="FrontDesk Supervisor UI", layout="wide")
-# st.title("FrontDesk — Supervisor / Agent Simulator / Knowledge Base")
-
-# # Top info
-# st.markdown("Backend: `" + BACKEND_URL + "`")
-
-# tabs = st.tabs(["Supervisor", "Agent Simulator", "Learned Answers", "Logs"])
-
-# # ---- helper functions ----
-# def fetch_requests(status: Optional[str] = None):
-#     params = {}
-#     if status:
-#         params["status"] = status
-#     r = requests.get(backend_url("/help-requests"), params=params, timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def get_request_by_id(req_id: int):
-#     rows = fetch_requests()
-#     for r in rows:
-#         if r["id"] == req_id:
-#             return r
-#     return None
-
-# def post_supervisor_response(req_id: int, response_text: str, status: str, save_to_kb: bool = False):
-#     payload = {"supervisor_response": response_text, "status": status, "save_to_kb": save_to_kb}
-#     r = requests.post(backend_url(f"/help-requests/{req_id}/respond"), json=payload, timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def trigger_agent_followup(req_id: int):
-#     r = requests.post(backend_url(f"/help-requests/{req_id}/agent-followup"), timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def create_help_request(caller_name: str, question: str, livekit_room: Optional[str] = None):
-#     payload = {"caller_name": caller_name, "question": question, "livekit_room": livekit_room}
-#     r = requests.post(backend_url("/help-requests"), json=payload, timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def list_kb():
-#     r = requests.get(backend_url("/learned-answers"), timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def create_kb_entry(question_pattern: str, answer: str, source: str = "MANUAL"):
-#     payload = {"question_pattern": question_pattern, "answer": answer, "source": source}
-#     r = requests.post(backend_url("/learned-answers"), json=payload, timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# def kb_search(q: str, top_k: int = 3):
-#     r = requests.get(backend_url("/kb/search"), params={"q": q, "top_k": top_k}, timeout=8)
-#     r.raise_for_status()
-#     return r.json()
-
-# # ---- Supervisor tab ----
-# with tabs[0]:
-#     st.header("Supervisor Panel")
-#     status_filter = st.selectbox("Filter by status", options=["pending", "resolved", "unresolved", "all"], index=0)
-#     requests_list = fetch_requests(None if status_filter == "all" else status_filter)
-#     st.write(f"Requests found: {len(requests_list)}")
-
-#     for req in requests_list:
-#         with st.expander(f"ID {req['id']} — {req['caller_name']} — {req['status']}"):
-#             st.write("**Question:**", req["question"])
-#             st.write("**Supervisor response:**", req.get("supervisor_response"))
-#             col1, col2 = st.columns([2, 1])
-#             with col1:
-#                 if st.button(f"Open responder {req['id']}", key=f"open-{req['id']}"):
-#                     st.session_state["selected_request"] = req["id"]
-#                     st.rerun()
-#             with col2:
-#                 if st.button(f"Trigger follow-up {req['id']}", key=f"fu-{req['id']}"):
-#                     try:
-#                         fu = trigger_agent_followup(req["id"])
-#                         st.success(fu.get("follow_up"))
-#                     except Exception as e:
-#                         st.error(e)
-
-#     sel = st.session_state.get("selected_request")
-#     if sel:
-#         st.subheader(f"Respond to {sel}")
-#         selected = get_request_by_id(sel)
-#         if not selected:
-#             st.error("Request missing (refresh)")
-#         else:
-#             st.write("Question:", selected["question"])
-#             resp = st.text_area("Supervisor answer", value=selected.get("supervisor_response") or "")
-#             status_choice = st.selectbox("Set status", options=["resolved", "unresolved"], index=0)
-#             save_kb_flag = st.checkbox("Also save this response to Knowledge Base", value=True)
-#             if st.button("Submit response", key=f"submit-{sel}"):
-#                 try:
-#                     post_supervisor_response(sel, resp, status_choice, save_to_kb=save_kb_flag)
-#                     st.success("Recorded. KB updated (if selected).")
-#                     st.session_state.pop("selected_request", None)
-#                     st.rerun()
-#                 except Exception as e:
-#                     st.error(e)
-
-# # ---- Agent Simulator tab ----
-# with tabs[1]:
-#     st.header("Agent Simulator (pre-check KB)")
-#     caller_name = st.text_input("Caller name", value="Alice")
-#     room_name = st.text_input("Optional LiveKit room name", value="")
-#     question = st.text_area("Customer question", value="Do you have availability tomorrow morning?")
-
-#     col_a, col_b = st.columns([1, 1])
-#     with col_a:
-#         if st.button("Check KB for answer"):
-#             try:
-#                 results = kb_search(question, top_k=3)
-#                 if not results:
-#                     st.info("No matching KB answers found.")
-#                 else:
-#                     st.write("KB suggestions (best first):")
-#                     for r in results:
-#                         st.markdown(f"**Score {r['score']}**  —  {r['question_pattern']}")
-#                         st.write(r['answer'])
-#             except Exception as e:
-#                 st.error(e)
-
-#     with col_b:
-#         if st.button("Simulate escalate (create help request)"):
-#             try:
-#                 created = create_help_request(caller_name, question, livekit_room=room_name or None)
-#                 st.success(f"Help request created (id {created['id']}).")
-#                 if created.get("kb_suggestion"):
-#                     st.info("KB suggestion found at creation time:")
-#                     s = created['kb_suggestion']
-#                     st.write(f"Score {s['score']} — {s['question_pattern']}")
-#                     st.write(s['answer'])
-#             except Exception as e:
-#                 st.error(e)
-
-# # ---- Learned Answers tab ----
-# with tabs[2]:
-#     st.header("Learned Answers (Knowledge Base)")
-#     q = st.text_input("Search KB (free text)", "")
-#     if st.button("Search KB"):
-#         try:
-#             res = kb_search(q, top_k=10)
-#             if not res:
-#                 st.info("No matches")
-#             else:
-#                 for r in res:
-#                     st.markdown(f"**ID {r['id']} — score {r['score']} — source {r.get('source')}**")
-#                     st.write("Pattern:", r['question_pattern'])
-#                     st.write("Answer:", r['answer'])
-#                     st.write("---")
-#         except Exception as e:
-#             st.error(e)
-
-#     st.markdown("### All KB entries")
-#     try:
-#         all_kb = list_kb()
-#         for e in all_kb:
-#             st.write(f"ID {e['id']} — {e.get('source')} — {e.get('created_at')}")
-#             st.write("Q:", e['question_pattern'])
-#             st.write("A:", e['answer'])
-#             st.write("---")
-#     except Exception as e:
-#         st.error(e)
-
-# # ---- Logs tab ----
-# with tabs[3]:
-#     st.header("Logs / Health")
-#     try:
-#         r = requests.get(backend_url("/help-requests"), timeout=5)
-#         st.success(f"Backend reachable (GET /help-requests => {r.status_code})")
-#     except Exception as e:
-#         st.error(f"Backend unreachable: {e}")
-#  """
