@@ -7,13 +7,13 @@ from dotenv import load_dotenv
 from typing import Optional
 import re 
 from agent_voice.speech import speak
-
+import speech_recognition as sr
 
 
 
 load_dotenv()  # loads supervisor_ui/.env if present, or project root .env
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 # Utility function to build absolute backend endpoints
 def backend_url(path: str) -> str:
@@ -243,19 +243,95 @@ with tabs[1]:
 
     # Input fields to create a help request
     col_a, col_b = st.columns([2, 4])
-    with col_a:
-        caller_name = st.text_input("Caller name", value="Alice")
-        room_name = st.text_input("Optional: LiveKit room name", value="")
-        kb_cutoff = st.slider(
-            "KB auto-reply threshold (0-1)",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.75,
-            step=0.05,
-            help="If KB match score >= threshold, treat as confident answer and don't escalate."
-        )
-    with col_b:
-        question = st.text_area("Customer question", value="Do you have an appointment tomorrow morning?")
+with col_a:
+    caller_name = st.text_input("Caller name", value="Alice")
+    room_name = st.text_input("Optional: LiveKit room name", value="")
+    kb_cutoff = st.slider(
+        "KB auto-reply threshold (0-1)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.75,
+        step=0.05,
+        help="If KB match score >= threshold, treat as confident answer and don't escalate."
+    )
+
+with col_b:
+    st.write("**🎙️ Speak your question**")
+
+    if "voice_input" not in st.session_state:
+        st.session_state.voice_input = ""
+
+    if st.button("🎤 Record / Stop Voice"):
+        r = sr.Recognizer()
+        with sr.Microphone() as source:
+            st.info("Listening... Speak now.")
+            try:
+                audio = r.listen(source, timeout=5, phrase_time_limit=10)
+                st.info("Processing your voice...")
+                text = r.recognize_google(audio)
+                st.session_state.voice_input = text
+                st.success(f"Recognized: {text}")
+
+                # Confirm what was heard
+                speak(f"You said: {text}")
+
+                # 🔹 Auto-check Knowledge Base
+                st.info("Checking Knowledge Base for an answer...")
+                kb_results = kb_search(text, top_k=5)
+
+                if not kb_results:
+                    st.warning("No KB entries found. Escalating to supervisor.")
+                    speak("I don’t know the answer. Forwarding this to the supervisor.")
+                    try:
+                        r = create_help_request(caller_name, text, livekit_room=room_name or None)
+                        st.success(f"Created help request ID: {r.get('id')}")
+                    except Exception as e:
+                        st.error(f"Failed to create help request: {e}")
+                    st.stop()
+
+                # Function to check basic relevance
+                def is_relevant(user_q, kb_q):
+                    import re
+                    user_words = set(re.findall(r"\w+", user_q.lower()))
+                    kb_words = set(re.findall(r"\w+", kb_q.lower()))
+                    stopwords = {"the", "is", "and", "a", "an", "to", "for", "in", "of", "on", "are", "you", "we", "do", "have"}
+                    overlap = (user_words - stopwords) & (kb_words - stopwords)
+                    return len(overlap) >= 2
+
+                # Analyze top KB match
+                top = kb_results[0]
+                top_score = top.get("score", 0)
+                top_question = top.get("question_pattern", "")
+                top_answer = top.get("answer", "")
+
+                # Decide based on confidence
+                if top_score >= kb_cutoff and is_relevant(text, top_question):
+                    st.success(f"KB match confident (score {top_score:.2f}) — replying automatically.")
+                    st.info(f"Agent reply: {top_answer}")
+                    speak(f"Here's what I found: {top_answer}")
+                else:
+                    st.warning("Low confidence. Escalating to supervisor.")
+                    speak("I’m not sure about that. I’ll forward this question to the supervisor.")
+                    try:
+                        r = create_help_request(caller_name, text, livekit_room=room_name or None)
+                        st.success(f"Help request ID {r.get('id')} created.")
+                    except Exception as e:
+                        st.error(f"Failed to create help request: {e}")
+
+            except sr.WaitTimeoutError:
+                st.warning("No voice detected, please try again.")
+            except sr.UnknownValueError:
+                st.error("Sorry, I couldn't understand that.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    # Text area auto-fills with recognized or typed question
+    question = st.text_area(
+        "Customer question",
+        value=st.session_state.get("voice_input", "Do you have an appointment tomorrow morning?")
+    )
+
+
 
     c1, c2, c3 = st.columns([1, 1, 1])
 
