@@ -5,4 +5,4 @@ pandas==2.2.3
 SpeechRecognition
 gTTS
 pygame
-
+PyAudio
